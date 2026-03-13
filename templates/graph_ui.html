@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Grafos Web UI - Pyvis</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/dist/vis-network.min.css" integrity="sha512-WgxfT5LWjfszlPHXRmBWHkV2eceiWTOBvrKCNbdgDYTHrT2AeLCGbF4sZlZw3UMN3WtL0tGUoIAKsu8mllg/XA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/vis-network.min.js" integrity="sha512-LnvoEWDFrqGHlHmDD2101OrLcbsfkrzoSpvtSQtxK3RMnRV0eOkhhBN2dXHKRrUU8p2DGRTk35n4O8nWSVe1mQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: rgba(18, 24, 47, 0.78);
+      --border: rgba(255, 255, 255, 0.08);
+      --text: #eef2ff;
+      --muted: #a7b0d6;
+      --primary: #7c8cff;
+      --primary-2: #6be2ff;
+      --danger: #fb7185;
+      --shadow: 0 22px 50px rgba(0, 0, 0, 0.35);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      background: radial-gradient(circle at top left, rgba(124, 140, 255, 0.22), transparent 30%),
+        radial-gradient(circle at top right, rgba(107, 226, 255, 0.18), transparent 24%),
+        linear-gradient(180deg, #090d1a, #0f172f 60%, #111827);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .shell {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 20px;
+      padding: 20px;
+      min-height: 100vh;
+    }
+    .panel, .canvas-card, .output-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+    .panel { padding: 18px; display: flex; flex-direction: column; gap: 16px; overflow: auto; }
+    .canvas-wrap { display: grid; grid-template-rows: auto 1fr auto; gap: 18px; min-height: calc(100vh - 40px); }
+    .hero {
+      padding: 22px;
+      background: linear-gradient(135deg, rgba(124, 140, 255, 0.22), rgba(107, 226, 255, 0.10));
+      border-radius: 22px;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .hero h1 { margin: 0; font-size: 1.5rem; }
+    .hero p { margin: 8px 0 0; color: var(--muted); }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
+    .stat { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); padding: 12px; border-radius: 16px; }
+    .stat-label { color: var(--muted); font-size: 0.8rem; }
+    .stat-value { margin-top: 4px; font-size: 1.15rem; font-weight: 700; }
+    .section { padding: 16px; background: rgba(255,255,255,0.04); border-radius: 18px; border: 1px solid rgba(255,255,255,0.06); }
+    .section h2 { margin: 0 0 12px; font-size: 0.95rem; letter-spacing: 0.02em; }
+    .hint { margin-top: 10px; color: var(--muted); font-size: 0.85rem; }
+    .grid { display: grid; gap: 10px; }
+    .grid.two { grid-template-columns: 1fr 1fr; }
+    select, input, button, textarea {
+      width: 100%;
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 14px;
+      background: rgba(6, 10, 23, 0.7);
+      color: var(--text);
+      padding: 11px 12px;
+      font: inherit;
+      outline: none;
+    }
+    button { cursor: pointer; font-weight: 600; transition: transform 0.16s ease, background 0.16s ease, border-color 0.16s ease; }
+    button:hover { transform: translateY(-1px); border-color: rgba(255,255,255,0.18); }
+    .primary { background: linear-gradient(135deg, var(--primary), var(--primary-2)); color: white; border: 0; }
+    .ghost { background: rgba(255,255,255,0.04); }
+    .danger { background: rgba(251, 113, 133, 0.14); color: #ffd4dc; }
+    .canvas-card { padding: 14px; min-height: 560px; position: relative; overflow: hidden; }
+    #mynetwork {
+      width: 100%;
+      height: 100%;
+      min-height: 560px;
+      border-radius: 18px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)),
+        radial-gradient(circle at center, rgba(124, 140, 255, 0.08), transparent 45%);
+    }
+    .canvas-toolbar { position: absolute; right: 24px; top: 24px; display: flex; gap: 10px; z-index: 10; }
+    .canvas-toolbar button { width: auto; padding-inline: 14px; }
+    .output-card { padding: 16px; }
+    .output-card h3 { margin: 0 0 10px; font-size: 0.95rem; }
+    #output { width: 100%; min-height: 180px; resize: vertical; line-height: 1.45; }
+    .modal {
+      position: fixed; inset: 0;
+      background: rgba(3, 6, 17, 0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      z-index: 100;
+    }
+    .modal.open { display: flex; }
+    .modal-card {
+      width: min(900px, 100%);
+      max-height: 82vh;
+      overflow: auto;
+      background: #0f172a;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+    .modal-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+    .modal-head h4 { margin: 0; font-size: 1rem; }
+    pre { margin: 0; white-space: pre-wrap; word-break: break-word; color: #dce5ff; line-height: 1.5; }
+    @media (max-width: 1100px) { .shell { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="panel">
+      <div class="hero">
+        <h1>Graph Studio (Pyvis)</h1>
+        <p>Interface construída com Pyvis. Arraste os vértices, crie arestas e use a mesma lógica Python do projeto.</p>
+        <div class="stats">
+          <div class="stat">
+            <div class="stat-label">Vértices</div>
+            <div id="stat-vertices" class="stat-value">{{ vertex_count }}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Arestas</div>
+            <div id="stat-edges" class="stat-value">{{ edge_count }}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Tipo</div>
+            <div id="stat-directed" class="stat-value">{{ "Dirigido" if directed else "Não dirigido" }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Criar vértice</h2>
+        <button id="add-vertex-btn" class="primary">Adicionar vértice automaticamente</button>
+        <div class="hint">IDs gerados como V1, V2, V3...</div>
+      </div>
+
+      <div class="section">
+        <h2>Remover vértice</h2>
+        <div class="grid">
+          <select id="remove-vertex-select">
+            {% for v in vertices %}
+            <option value="{{ v }}">{{ v }}</option>
+            {% else %}
+            <option value="">Sem vértices</option>
+            {% endfor %}
+          </select>
+          <button id="remove-vertex-btn" class="danger">Remover vértice</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Criar aresta</h2>
+        <div class="grid">
+          <div class="grid two">
+            <select id="edge-from-select">
+              <option value="">Origem</option>
+              {% for v in vertices %}
+              <option value="{{ v }}">{{ v }}</option>
+              {% endfor %}
+            </select>
+            <select id="edge-to-select">
+              <option value="">Destino</option>
+              {% for v in vertices %}
+              <option value="{{ v }}">{{ v }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <input id="edge-weight-input" type="number" step="0.1" value="1" placeholder="Peso" />
+          <button id="add-edge-btn" class="primary">Adicionar aresta</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Remover / consultar aresta</h2>
+        <div class="grid">
+          <select id="edge-select">
+            {% for e in edge_ids %}
+            <option value="{{ e }}">{{ e }}</option>
+            {% else %}
+            <option value="">Sem arestas</option>
+            {% endfor %}
+          </select>
+          <div class="grid two">
+            <button id="edge-info-btn" class="ghost">Detalhes</button>
+            <button id="remove-edge-btn" class="danger">Remover</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Operações</h2>
+        <div class="grid">
+          <div class="grid two">
+            <select id="adj-v-select">
+              <option value="">Vértice A</option>
+              {% for v in vertices %}
+              <option value="{{ v }}">{{ v }}</option>
+              {% endfor %}
+            </select>
+            <select id="adj-w-select">
+              <option value="">Vértice B</option>
+              {% for v in vertices %}
+              <option value="{{ v }}">{{ v }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <button id="check-adj-btn" class="ghost">Verificar adjacência</button>
+          <div class="grid two">
+            <button id="adj-matrix-btn" class="ghost">Matriz de adjacência</button>
+            <button id="inc-matrix-btn" class="ghost">Matriz de incidência</button>
+          </div>
+          <button id="prim-btn" class="primary">Destacar árvore geradora mínima</button>
+          <button id="toggle-directed-btn" class="ghost">Alternar dirigido / não dirigido</button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="canvas-wrap">
+      <section class="canvas-card">
+        <div class="canvas-toolbar">
+          <button id="fit-btn" class="ghost">Centralizar</button>
+          <button id="refresh-btn" class="ghost">Atualizar</button>
+        </div>
+        <div id="mynetwork"></div>
+      </section>
+
+      <section class="output-card">
+        <h3>Resultado</h3>
+        <textarea id="output" readonly placeholder="Os resultados das operações aparecem aqui."></textarea>
+      </section>
+    </main>
+  </div>
+
+  <div id="modal" class="modal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h4 id="modal-title">Detalhes</h4>
+        <button id="close-modal-btn" class="ghost" style="width:auto;">Fechar</button>
+      </div>
+      <pre id="modal-content"></pre>
+    </div>
+  </div>
+
+  <script type="text/javascript">
+    var API_BASE = window.location.origin;
+    var output = document.getElementById("output");
+    var modal = document.getElementById("modal");
+    var modalTitle = document.getElementById("modal-title");
+    var modalContent = document.getElementById("modal-content");
+    var network = null;
+
+    function setOutput(text) { output.value = String(text || ""); }
+    function openModal(title, text) {
+      modalTitle.textContent = title;
+      modalContent.textContent = text;
+      modal.classList.add("open");
+    }
+    function closeModal() { modal.classList.remove("open"); }
+
+    function formatMatrix(payload) {
+      var cols = payload.columns;
+      var rows = payload.rows;
+      var matrix = payload.matrix;
+      var width = 8;
+      var lines = [payload.title, ""];
+      lines.push(" ".repeat(width) + cols.map(function(c) { return String(c).padStart(width); }).join(""));
+      rows.forEach(function(rowLabel, rowIndex) {
+        var row = matrix[rowIndex].map(function(v) { return String(v).padStart(width); }).join("");
+        lines.push(String(rowLabel).padStart(width) + row);
+      });
+      return lines.join("\n");
+    }
+
+    async function api(path, opts) {
+      opts = opts || {};
+      var url = path.startsWith("http") ? path : API_BASE + path;
+      var res = await fetch(url, opts);
+      var data = {};
+      try {
+        var text = await res.text();
+        data = text ? JSON.parse(text) : {};
+      } catch (e) {}
+      if (!res.ok) {
+        var detail = data.detail;
+        var msg = Array.isArray(detail)
+          ? detail.map(function(d) { return (d && d.msg) || JSON.stringify(d); }).join("; ")
+          : (detail || res.statusText || "Erro na requisição");
+        throw new Error(String(msg));
+      }
+      return data;
+    }
+
+    function drawGraph() {
+      var container = document.getElementById("mynetwork");
+      var nodes = new vis.DataSet({{ nodes | tojson }});
+      var edges = new vis.DataSet({{ edges | tojson }});
+      var data = { nodes: nodes, edges: edges };
+      var options = {{ options | safe }};
+
+      network = new vis.Network(container, data, options);
+
+      network.on("dragEnd", function(params) {
+        if (!params.nodes || params.nodes.length === 0) return;
+        params.nodes.forEach(function(nodeId) {
+          var pos = network.getPosition(nodeId);
+          fetch(API_BASE + "/api/positions/" + nodeId, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ x: pos.x, y: pos.y })
+          });
+        });
+      });
+
+      network.on("doubleClick", function(params) {
+        if (params.nodes && params.nodes.length > 0) {
+          setOutput("Vértice selecionado: " + params.nodes[0]);
+        }
+      });
+    }
+    drawGraph();
+
+    document.getElementById("add-vertex-btn").addEventListener("click", function() {
+      var btn = this;
+      var orig = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Adicionando...";
+      api("/api/vertices", { method: "POST" })
+        .then(function() { location.reload(); })
+        .catch(function(err) { setOutput("Erro: " + err.message); })
+        .finally(function() { btn.disabled = false; btn.textContent = orig; });
+    });
+
+    document.getElementById("remove-vertex-btn").addEventListener("click", function() {
+      var vertexId = document.getElementById("remove-vertex-select").value;
+      if (!vertexId) return setOutput("Selecione um vértice para remover.");
+      api("/api/vertices/" + vertexId, { method: "DELETE" })
+        .then(function() { location.reload(); })
+        .catch(function(err) { setOutput("Erro: " + err.message); });
+    });
+
+    document.getElementById("add-edge-btn").addEventListener("click", function() {
+      var v = document.getElementById("edge-from-select").value;
+      var w = document.getElementById("edge-to-select").value;
+      var value = parseFloat(document.getElementById("edge-weight-input").value) || 1;
+      if (!v || !w) return setOutput("Selecione origem e destino.");
+      api("/api/edges", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ v: v, w: w, value: value })
+      })
+        .then(function() { location.reload(); })
+        .catch(function(err) { setOutput("Erro: " + err.message); });
+    });
+
+    document.getElementById("remove-edge-btn").addEventListener("click", function() {
+      var edgeId = document.getElementById("edge-select").value;
+      if (!edgeId) return setOutput("Selecione uma aresta para remover.");
+      api("/api/edges/" + edgeId, { method: "DELETE" })
+        .then(function() { location.reload(); })
+        .catch(function(err) { setOutput("Erro: " + err.message); });
+    });
+
+    document.getElementById("edge-info-btn").addEventListener("click", function() {
+      var edgeId = document.getElementById("edge-select").value;
+      if (!edgeId) return setOutput("Selecione uma aresta.");
+      api("/api/edge/" + edgeId)
+        .then(function(data) {
+          openModal("Detalhes da aresta " + data.id,
+            "ID: " + data.id + "\nValor: " + data.value + "\nExtremidades: (" + data.extremities[0] + ", " + data.extremities[1] + ")");
+        })
+        .catch(function(err) { setOutput(err.message); });
+    });
+
+    document.getElementById("check-adj-btn").addEventListener("click", function() {
+      var v = document.getElementById("adj-v-select").value;
+      var w = document.getElementById("adj-w-select").value;
+      if (!v || !w) return setOutput("Selecione dois vértices.");
+      api("/api/check-adjacency", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ v: v, w: w })
+      })
+        .then(function(data) { setOutput("Adjacência entre " + v + " e " + w + ": " + data.adjacent); })
+        .catch(function(err) { setOutput(err.message); });
+    });
+
+    document.getElementById("adj-matrix-btn").addEventListener("click", function() {
+      api("/api/adjacency-matrix")
+        .then(function(data) { openModal(data.title, formatMatrix(data)); })
+        .catch(function(err) { setOutput(err.message); });
+    });
+
+    document.getElementById("inc-matrix-btn").addEventListener("click", function() {
+      api("/api/incidence-matrix")
+        .then(function(data) { openModal(data.title, formatMatrix(data)); })
+        .catch(function(err) { setOutput(err.message); });
+    });
+
+    document.getElementById("prim-btn").addEventListener("click", function() {
+      api("/api/prim")
+        .then(function() { location.reload(); })
+        .catch(function(err) { setOutput("Erro: " + err.message); });
+    });
+
+    document.getElementById("toggle-directed-btn").addEventListener("click", function() {
+      api("/api/toggle-directed", { method: "POST" })
+        .then(function() { location.reload(); })
+        .catch(function(err) { setOutput("Erro: " + err.message); });
+    });
+
+    document.getElementById("fit-btn").addEventListener("click", function() {
+      if (network) network.fit({ animation: true });
+    });
+
+    document.getElementById("refresh-btn").addEventListener("click", function() {
+      location.reload();
+    });
+
+    document.getElementById("close-modal-btn").addEventListener("click", closeModal);
+    modal.addEventListener("click", function(ev) {
+      if (ev.target === modal) closeModal();
+    });
+
+    setOutput("Web UI pronta com Pyvis. Arraste os vértices e use o painel para editar o grafo.");
+  </script>
+</body>
+</html>

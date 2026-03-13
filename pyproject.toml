@@ -1,0 +1,13 @@
+[project]
+name = "grafos"
+version = "0.1.0"
+description = "Implementação de grafos com lista de adjacência"
+requires-python = ">=3.10"
+dependencies = [
+    "flask>=3.1.0",
+    "pyvis>=0.3.2",
+    "pywebview>=5.3.2",
+]
+
+[project.scripts]
+grafos = "src.ui:main"
