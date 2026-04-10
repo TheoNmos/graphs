@@ -41,7 +41,7 @@ class Graph:
         self.name = name
         self._vertices: set[str] = set()
         self._edges: dict[str, Edge] = {}
-        self._adjacency: dict[str, list[tuple[str, str, float]]] = {} # lista de adjacência do grafo
+        self._adjacency: dict[str, list[tuple[str, str, float]]] = {}  # lista de adjacência do grafo
 
     def add_vertex(self, vertex_id: str) -> bool:
         """Insere um novo vértice isolado."""
@@ -108,20 +108,24 @@ class Graph:
         """Remove a aresta/arco a pelo identificador."""
         if edge_id not in self._edges:
             return False
+        # recupera a aresta pra saber de quais listas de adjacência ela precisa ser removida
         edge = self._edges[edge_id]
         source_vertex_id = edge.source_vertex_id
         target_vertex_id = edge.target_vertex_id
+        # remove a aresta da lista de adjacência do vértice de origem
         self._adjacency[source_vertex_id] = [
             (neighbor_vertex_id, adjacent_edge_id, edge_value)
             for neighbor_vertex_id, adjacent_edge_id, edge_value in self._adjacency[source_vertex_id]
             if adjacent_edge_id != edge_id
         ]
+        # se o grafo não for dirigido, remove também da lista do vértice de destino
         if not self.directed:
             self._adjacency[target_vertex_id] = [
                 (neighbor_vertex_id, adjacent_edge_id, edge_value)
                 for neighbor_vertex_id, adjacent_edge_id, edge_value in self._adjacency[target_vertex_id]
                 if adjacent_edge_id != edge_id
             ]
+        # por fim remove a aresta da estrutura principal de arestas
         del self._edges[edge_id]
         return True
 
@@ -129,12 +133,14 @@ class Graph:
         """Verifica se dois vértices são adjacentes."""
         if first_vertex_id not in self._adjacency:
             return False
+        # percorre os vizinhos do primeiro vértice procurando o segundo
         return any(
             neighbor_vertex_id == second_vertex_id for neighbor_vertex_id, _, _ in self._adjacency[first_vertex_id]
         )
 
     def get_edge_value(self, edge_id: str) -> Optional[float]:
         """Retorna o valor da aresta/arco a."""
+        # busca a aresta pelo id e devolve o peso dela, se existir
         edge = self._edges.get(edge_id)
         return edge.value if edge else None
 
@@ -144,6 +150,7 @@ class Graph:
         target_vertex_id: str,
     ) -> Optional[float]:
         """Retorna o valor da aresta entre dois vértices (primeira encontrada)."""
+        # percorre os vizinhos do vértice de origem até encontrar o destino
         for neighbor_vertex_id, _, edge_value in self._adjacency.get(source_vertex_id, []):
             if neighbor_vertex_id == target_vertex_id:
                 return edge_value
@@ -151,6 +158,7 @@ class Graph:
 
     def get_edge_extremities(self, edge_id: str) -> Optional[tuple[str, str]]:
         """Retorna as extremidades (v, w) da aresta/arco a."""
+        # retorna origem e destino da aresta a partir do id informado
         edge = self._edges.get(edge_id)
         return (edge.source_vertex_id, edge.target_vertex_id) if edge else None
 
@@ -160,6 +168,7 @@ class Graph:
         target_vertex_id: str,
     ) -> Optional[str]:
         """Retorna o id da primeira aresta entre dois vértices."""
+        # procura na adjacência da origem qual aresta leva até o destino
         for neighbor_vertex_id, edge_id, _ in self._adjacency.get(source_vertex_id, []):
             if neighbor_vertex_id == target_vertex_id:
                 return edge_id
@@ -167,10 +176,12 @@ class Graph:
 
     def adjacency_matrix(self) -> list[list[float]]:
         """Retorna a matriz de adjacência (valores são pesos; 0 se não adjacente)."""
+        # ordena os vértices pra manter uma ordem fixa nas linhas e colunas da matriz
         vertex_ids = sorted(self._vertices)
         vertex_count = len(vertex_ids)
         vertex_index_by_id = {vertex_id: index for index, vertex_id in enumerate(vertex_ids)}
         adjacency_matrix = [[0.0] * vertex_count for _ in range(vertex_count)]
+        # preenche a matriz com o peso da aresta entre cada par de vértices adjacentes
         for vertex_id in vertex_ids:
             for neighbor_vertex_id, _, edge_value in self._adjacency[vertex_id]:
                 adjacency_matrix[vertex_index_by_id[vertex_id]][vertex_index_by_id[neighbor_vertex_id]] = edge_value
@@ -186,12 +197,14 @@ class Graph:
         Linhas = vértices (ordem alfabética), Colunas = arestas (ordem dos ids).
         Para aresta (v,w): +1 em v, -1 em w (dirigido) ou +1 em ambos (não dirigido).
         """
+        # define a ordem dos vértices e das arestas pra montar a matriz de forma consistente
         vertex_ids = sorted(self._vertices)
         edges_with_ids = sorted(self._edges.items(), key=lambda item: item[0])
         vertex_count = len(vertex_ids)
         edge_count = len(edges_with_ids)
         vertex_index_by_id = {vertex_id: index for index, vertex_id in enumerate(vertex_ids)}
         incidence_matrix = [[0] * edge_count for _ in range(vertex_count)]
+        # marca a incidência de cada aresta nas linhas correspondentes aos vértices dela
         for edge_index, (_, edge) in enumerate(edges_with_ids):
             source_index = vertex_index_by_id[edge.source_vertex_id]
             target_index = vertex_index_by_id[edge.target_vertex_id]
@@ -213,13 +226,16 @@ class Graph:
 
     def display_ascii(self) -> str:
         """Retorna representação textual do grafo (vértices e arestas)."""
+        # começa montando o cabeçalho com nome, tipo e lista de vértices
         lines = [f"=== {self.name} ({'Dirigido' if self.directed else 'Não Dirigido'}) ==="]
         lines.append(f"Vértices: {sorted(self._vertices)}")
         lines.append("Arestas/Arcos:")
+        # adiciona uma linha para cada aresta/arco com origem, destino e peso
         for edge_id, edge in sorted(self._edges.items(), key=lambda item: item[0]):
             arrow = " -> " if self.directed else " <-> "
             lines.append(f"  {edge_id}: {edge.source_vertex_id}{arrow}{edge.target_vertex_id} (valor={edge.value})")
         lines.append("\nLista de Adjacência:")
+        # depois monta uma visão textual da lista de adjacência de cada vértice
         for vertex_id in sorted(self._vertices):
             adjacency_entries = self._adjacency[vertex_id]
             if adjacency_entries:
@@ -234,24 +250,29 @@ class Graph:
 
     def total_edge_weight(self) -> float:
         """Soma dos pesos de todas as arestas/arcos."""
+        # soma o peso de todas as arestas atualmente armazenadas no grafo
         return sum(edge.value for edge in self._edges.values())
 
     def reachability_matrix_roy(self) -> tuple[list[list[bool]], list[str]]:
         """
-        Fecho transitivo (alcançabilidade) via Roy–Warshall sobre o grafo.
+        Fecho transitivo (alcançabilidade) via Roy-Warshall sobre o grafo.
         Retorna a matriz booleana R e a ordem das linhas/colunas (vértices ordenados).
         """
+        # ordena os vértices e prepara a estrutura base da matriz de alcançabilidade
         vertex_ids = sorted(self._vertices)
         n = len(vertex_ids)
         if n == 0:
             return [], []
         index_by_id = {vertex_id: index for index, vertex_id in enumerate(vertex_ids)}
         reachability = [[False] * n for _ in range(n)]
+        # todo vértice alcança a si mesmo
         for index in range(n):
             reachability[index][index] = True
+        # marca as alcançabilidades diretas com base na lista de adjacência
         for vertex_id in vertex_ids:
             for neighbor_id, _, _ in self._adjacency.get(vertex_id, []):
                 reachability[index_by_id[vertex_id]][index_by_id[neighbor_id]] = True
+        # aplica o fechamento transitivo usando vértices intermediários
         for bridge_vertex in range(n):
             for source_vertex in range(n):
                 if not reachability[source_vertex][bridge_vertex]:
@@ -269,6 +290,7 @@ class Graph:
         - não dirigido: componentes conexas;
         - dirigido: componentes fortemente conexas (via R[u,v] e R[v,u]).
         """
+        # primeiro calcula a matriz de alcançabilidade entre todos os vértices
         reachability, vertex_ids = self.reachability_matrix_roy()
         if not vertex_ids:
             return []
@@ -276,6 +298,7 @@ class Graph:
         visited: set[str] = set()
         components: list[list[str]] = []
         if self.directed:
+            # em grafos dirigidos, um componente exige alcançabilidade nos dois sentidos
             for vertex_id in vertex_ids:
                 if vertex_id in visited:
                     continue
@@ -290,6 +313,7 @@ class Graph:
                     visited.add(member_id)
                 components.append(sorted(component))
         else:
+            # em grafos não dirigidos, basta alcançar os outros vértices do mesmo grupo
             for vertex_id in vertex_ids:
                 if vertex_id in visited:
                     continue
@@ -302,16 +326,21 @@ class Graph:
 
     def bfs_guided(self, source: str, target: str) -> GuidedSearchResult:
         """Busca em largura guiada: interrompe ao desenfileirar o destino; monta a árvore de BFS."""
+        # se origem ou destino não existirem, não tem como executar a busca
         if source not in self._vertices or target not in self._vertices:
             return GuidedSearchResult(source, target, False, [], [])
+        # se origem e destino forem o mesmo vértice, o caminho já está resolvido
         if source == target:
             return GuidedSearchResult(source, target, True, [], [source])
 
+        # parent_by_vertex guarda de qual vértice cada vértice foi alcançado na busca
         parent_by_vertex: dict[str, Optional[str]] = {source: None}
+        # edge_to_child guarda qual aresta foi usada para chegar em cada vértice
         edge_to_child: dict[str, str] = {}
         queue: deque[str] = deque([source])
         target_reached = False
 
+        # bfs percorre em camadas até encontrar o destino ou esgotar os vértices alcançáveis
         while queue:
             current_vertex = queue.popleft()
             if current_vertex == target:
@@ -323,11 +352,13 @@ class Graph:
                     edge_to_child[neighbor_id] = edge_id
                     queue.append(neighbor_id)
 
+        # reconstrói a árvore de busca usando o mapa de pais criado durante a bfs
         tree_edges: list[tuple[str, str, str]] = []
         for vertex_id, parent_vertex in parent_by_vertex.items():
             if parent_vertex is not None:
                 tree_edges.append((parent_vertex, vertex_id, edge_to_child[vertex_id]))
 
+        # se o destino foi encontrado, remonta o caminho voltando pelos pais até a origem
         path: list[str] = []
         if target_reached:
             step_vertex: str | None = target
@@ -340,22 +371,27 @@ class Graph:
 
     def dfs_guided(self, source: str, target: str) -> GuidedSearchResult:
         """Busca em profundidade guiada; prioriza expandir o vizinho igual ao destino."""
+        # se origem ou destino não existirem, não tem como executar a busca
         if source not in self._vertices or target not in self._vertices:
             return GuidedSearchResult(source, target, False, [], [])
+        # se origem e destino forem o mesmo vértice, o caminho já está resolvido
         if source == target:
             return GuidedSearchResult(source, target, True, [], [source])
 
+        # estruturas equivalentes às da bfs, mas agora usadas na busca em profundidade
         parent_by_vertex: dict[str, Optional[str]] = {source: None}
         edge_to_child: dict[str, str] = {}
         found = False
 
         def ordered_neighbors(vertex_id: str) -> list[tuple[str, str, float]]:
+            # prioriza o destino se ele já aparecer entre os vizinhos
             neighbors = list(self._adjacency.get(vertex_id, []))
             neighbors.sort(key=lambda item: (0 if item[0] == target else 1, item[0]))
             return neighbors
 
         def visit(vertex_id: str) -> None:
             nonlocal found
+            # interrompe chamadas recursivas extras quando o destino já foi encontrado
             if found:
                 return
             if vertex_id == target:
@@ -369,14 +405,17 @@ class Graph:
                     if found:
                         return
 
+        # inicia a dfs a partir da origem
         visit(source)
 
+        # monta a árvore gerada pela dfs com base no mapa de pais
         tree_edges = [
             (parent_vertex, vertex_id, edge_to_child[vertex_id])
             for vertex_id, parent_vertex in parent_by_vertex.items()
             if parent_vertex is not None
         ]
 
+        # se encontrou o destino, remonta o caminho final voltando pelos pais
         path: list[str] = []
         if found:
             step_vertex: str | None = target
@@ -389,18 +428,22 @@ class Graph:
 
     def build_search_tree_graph(self, result: GuidedSearchResult, name: str | None = None) -> Graph:
         """Monta um grafo apenas com as arestas da árvore de busca (mesmos ids e pesos que no grafo atual)."""
+        # cria um novo grafo só com os vértices e arestas que fizeram parte da árvore da busca
         display_name = name or f"Árvore ({result.source} → {result.target})"
         tree_graph = Graph(directed=self.directed, name=display_name)
         vertices_in_tree: set[str] = set()
         if result.source in self._vertices:
             vertices_in_tree.add(result.source)
+        # coleta todos os vértices que aparecem nas arestas da árvore de busca
         for parent_vertex, child_vertex, _ in result.tree_edges:
             if parent_vertex in self._vertices:
                 vertices_in_tree.add(parent_vertex)
             if child_vertex in self._vertices:
                 vertices_in_tree.add(child_vertex)
+        # adiciona os vértices ao novo grafo antes de inserir as arestas
         for vertex_id in sorted(vertices_in_tree):
             tree_graph.add_vertex(vertex_id)
+        # recria as arestas da árvore usando os mesmos ids e pesos do grafo original
         for parent_vertex, child_vertex, edge_id in result.tree_edges:
             if parent_vertex not in self._vertices or child_vertex not in self._vertices:
                 continue
@@ -415,20 +458,25 @@ class Graph:
         Algoritmo de Prim: retorna a árvore geradora mínima.
         Retorna None se o grafo não for conexo ou for dirigido (Prim não aplica a dirigidos).
         """
+        # prim só faz sentido em grafos não dirigidos e com pelo menos um vértice
         if self.directed or not self._vertices:
             return None
+        # caso trivial: um grafo com um único vértice já é sua própria árvore mínima
         if len(self._vertices) == 1:
             mst = Graph(directed=False, name=f"MST de {self.name}")
             mst.add_vertex(next(iter(self._vertices)))
             return mst
 
+        # começa a árvore pelo menor id de vértice, só pra ter um ponto de partida fixo
         vertices_in_mst: set[str] = set()
         start_vertex_id = min(self._vertices)
         vertices_in_mst.add(start_vertex_id)
         minimum_spanning_tree = Graph(directed=False, name=f"MST de {self.name}")
+        # a mst final terá os mesmos vértices do grafo original
         for vertex_id in self._vertices:
             minimum_spanning_tree.add_vertex(vertex_id)
 
+        # a cada passo, escolhe a menor aresta que liga a árvore atual a um vértice fora dela
         while len(vertices_in_mst) < len(self._vertices):
             best_source_vertex_id = None
             best_target_vertex_id = None
@@ -441,8 +489,10 @@ class Graph:
                         best_target_vertex_id = neighbor_vertex_id
                         best_edge_id = edge_id
                         best_edge_value = edge_value
+            # se não encontrou uma aresta válida, o grafo não é conexo
             if best_source_vertex_id is None or best_target_vertex_id is None or best_edge_id is None:
                 return None
+            # adiciona o novo vértice e a melhor aresta encontrada na mst
             vertices_in_mst.add(best_target_vertex_id)
             minimum_spanning_tree.add_edge(
                 best_edge_id,
@@ -455,12 +505,15 @@ class Graph:
 
     @property
     def vertices(self) -> set[str]:
+        # devolve uma cópia pra evitar alteração externa direta no conjunto interno
         return self._vertices.copy()
 
     @property
     def edges(self) -> dict[str, Edge]:
+        # devolve uma cópia pra evitar alteração externa direta no dicionário interno
         return self._edges.copy()
 
     def get_adjacency_list(self) -> dict[str, list[tuple[str, str, float]]]:
         """Retorna cópia da lista de adjacência (vértice -> [(vizinho, edge_id, peso), ...])."""
+        # cria uma cópia superficial da estrutura de adjacência pra leitura externa
         return {vertex_id: list(adjacency_entries) for vertex_id, adjacency_entries in self._adjacency.items()}

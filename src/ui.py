@@ -1,5 +1,3 @@
-"""Interface moderna em janela usando Flask + pyvis + pywebview."""
-
 from __future__ import annotations
 
 import json
