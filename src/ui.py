@@ -10,15 +10,42 @@ import time
 import urllib.request
 from typing import Any, Iterable
 
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, jsonify, make_response, render_template_string, request
 from pyvis.network import Network
 
-from .graph import Graph
+from .graph import Graph, GuidedSearchResult
+
+_VIS_NODE_PALETTE = [
+    "#4f9cff",
+    "#22c55e",
+    "#f59e0b",
+    "#ef4444",
+    "#a78bfa",
+    "#2dd4bf",
+    "#fb7185",
+    "#f472b6",
+    "#fcd34d",
+]
 
 try:
     import webview  # type: ignore[import-not-found]
 except ImportError:  # pragma: no cover - depende do ambiente local
     webview = None
+
+# pyvis inclui Bootstrap via jsDelivr; sem rede o iframe fica em branco. O grafo não precisa disso.
+_PYVIS_BOOTSTRAP_LINK = re.compile(
+    r"\s*<link[^>]*href=[\"'][^\"']*bootstrap[^\"']*[\"'][^>]*>\s*",
+    re.IGNORECASE,
+)
+_PYVIS_BOOTSTRAP_SCRIPT = re.compile(
+    r"\s*<script[^>]*src=[\"'][^\"']*bootstrap[^\"']*[\"'][^>]*>\s*</script>\s*",
+    re.IGNORECASE,
+)
+
+
+def _strip_pyvis_bootstrap_cdn(html: str) -> str:
+    html = _PYVIS_BOOTSTRAP_LINK.sub("", html)
+    return _PYVIS_BOOTSTRAP_SCRIPT.sub("", html)
 
 
 INDEX_HTML = """
@@ -376,6 +403,29 @@ INDEX_HTML = """
           </form>
         </div>
       </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Busca guiada</h2></div>
+        <div class="card-body">
+          <form id="search-guided-form">
+            <div class="row">
+              <label>Origem
+                <input id="search-from" placeholder="A">
+              </label>
+              <label>Destino
+                <input id="search-to" placeholder="B">
+              </label>
+            </div>
+            <div class="row">
+              <button class="success" type="submit" id="btn-bfs-run">BFS (árvore)</button>
+              <button class="success" type="button" id="btn-dfs-run">DFS (árvore)</button>
+            </div>
+            <p class="muted" style="margin:0;font-size:13px;line-height:1.45">
+              Execute a busca e use os botões na visualização para ver a árvore. Caminho encontrado aparece em destaque (laranja) quando existir.
+            </p>
+          </form>
+        </div>
+      </section>
     </aside>
 
     <main class="content">
@@ -383,11 +433,14 @@ INDEX_HTML = """
         <div class="card-head">
           <div>
             <h2>Visualização</h2>
-            <p class="muted">Arraste os nós, use zoom e alterne entre o grafo e a MST.</p>
+            <p class="muted">Arraste os nós, use zoom e alterne entre o grafo, MST, buscas e componentes (Roy).</p>
           </div>
           <div class="toolbar">
             <button class="ghost" id="btn-view-graph" type="button">Ver grafo</button>
             <button class="ghost" id="btn-view-mst" type="button">Ver MST (Prim)</button>
+            <button class="ghost" id="btn-view-bfs" type="button">Ver BFS</button>
+            <button class="ghost" id="btn-view-dfs" type="button">Ver DFS</button>
+            <button class="ghost" id="btn-view-roy" type="button">Roy (componentes)</button>
             <button class="primary" id="btn-refresh" type="button">Atualizar</button>
           </div>
         </div>
@@ -407,7 +460,7 @@ INDEX_HTML = """
           <div class="card-body"><div id="vertices-box" class="result"></div></div>
         </section>
         <section class="card">
-          <div class="card-head"><h2>MST</h2></div>
+          <div class="card-head"><h2>MST / Roy</h2></div>
           <div class="card-body"><div id="mst-box" class="result"></div></div>
         </section>
       </section>
@@ -530,9 +583,28 @@ INDEX_HTML = """
       renderSimpleList("vertices-box", graph.vertices, "Nenhum vértice cadastrado.");
 
       const mstText = state.mst
-        ? `MST disponível com ${state.mst.vertices.length} vértices e ${state.mst.edges.length} arestas.`
-        : "MST indisponível para o estado atual.";
-      document.getElementById("mst-box").textContent = mstText;
+        ? `AGM (Prim): custo total = ${state.mst_cost != null ? state.mst_cost : "—"} (${state.mst.edges.length} arestas).`
+        : "AGM indisponível (grafo dirigido ou não conexo).";
+      const roy = state.roy_components || [];
+      const royText = roy.length
+        ? roy.map((comp, index) => `C${index + 1}: {${comp.join(", ")}}`).join("\\n")
+        : "—";
+      const bfsHint = state.bfs_last
+        ? `Última BFS: ${state.bfs_last.source} → ${state.bfs_last.target} | ${
+            state.bfs_last.found ? state.bfs_last.path.join(" → ") : "não alcançável"
+          } | árvore: ${state.bfs_last.tree_edges.length} arestas.`
+        : "Nenhuma BFS executada ainda.";
+      const dfsHint = state.dfs_last
+        ? `Última DFS: ${state.dfs_last.source} → ${state.dfs_last.target} | ${
+            state.dfs_last.found ? state.dfs_last.path.join(" → ") : "não alcançável"
+          } | árvore: ${state.dfs_last.tree_edges.length} arestas.`
+        : "Nenhuma DFS executada ainda.";
+      document.getElementById("mst-box").innerHTML =
+        `<div>${mstText}</div>` +
+        `<div class="muted" style="margin-top:10px;font-size:13px">Roy (componentes)</div>` +
+        `<pre style="margin:6px 0 0;font:inherit;font-size:13px;white-space:pre-wrap;line-height:1.45">${royText}</pre>` +
+        `<div class="muted" style="margin-top:10px;font-size:13px">${bfsHint}</div>` +
+        `<div class="muted" style="margin-top:6px;font-size:13px">${dfsHint}</div>`;
 
       renderTable(
         "edges-table",
@@ -643,6 +715,41 @@ INDEX_HTML = """
       setStatus("Mostrando a árvore geradora mínima quando disponível.");
     });
 
+    document.getElementById("btn-view-bfs").addEventListener("click", async () => {
+      currentView = "bfs";
+      refreshGraphFrame();
+      setStatus("Mostrando a última árvore de busca em largura (execute BFS antes, se necessário).");
+    });
+
+    document.getElementById("btn-view-dfs").addEventListener("click", async () => {
+      currentView = "dfs";
+      refreshGraphFrame();
+      setStatus("Mostrando a última árvore de busca em profundidade (execute DFS antes, se necessário).");
+    });
+
+    document.getElementById("btn-view-roy").addEventListener("click", async () => {
+      currentView = "roy";
+      refreshGraphFrame();
+      setStatus("Colorindo vértices por componente (conexa ou fortemente conexa, conforme o tipo do grafo).");
+    });
+
+    document.getElementById("search-guided-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      currentView = "bfs";
+      await submitJson("/api/search/bfs", {
+        v: document.getElementById("search-from").value,
+        w: document.getElementById("search-to").value,
+      });
+    });
+
+    document.getElementById("btn-dfs-run").addEventListener("click", async () => {
+      currentView = "dfs";
+      await submitJson("/api/search/dfs", {
+        v: document.getElementById("search-from").value,
+        w: document.getElementById("search-to").value,
+      });
+    });
+
     document.getElementById("btn-refresh").addEventListener("click", refreshState);
 
     refreshState();
@@ -659,6 +766,8 @@ class GraphApp:
         self._lock = threading.RLock()
         self.graph = Graph(directed=False, name="Grafo Principal")
         self.message = "Aplicação carregada."
+        self._last_bfs: GuidedSearchResult | None = None
+        self._last_dfs: GuidedSearchResult | None = None
 
     def _set_message(self, message: str) -> None:
         self.message = message
@@ -674,16 +783,75 @@ class GraphApp:
         return f"{prefix}{highest + 1}"
 
     def next_vertex_id(self) -> str:
-        return self._next_id(self.graph.vertices, "v")
+        return self._next_id(self.graph.vertices, "V")
 
     def next_edge_id(self) -> str:
-        return self._next_id(self.graph.edges.keys(), "e")
+        return self._next_id(self.graph.edges.keys(), "A")
 
     def reset_graph(self, name: str, directed: bool) -> str:
         with self._lock:
             self.graph = Graph(directed=directed, name=name or "Grafo Principal")
+            self._last_bfs = None
+            self._last_dfs = None
             self._set_message("Novo grafo criado com sucesso.")
             return self.message
+
+    def run_bfs(self, source_vertex: str, target_vertex: str) -> str:
+        with self._lock:
+            source_vertex = source_vertex.strip()
+            target_vertex = target_vertex.strip()
+            if not source_vertex or not target_vertex:
+                self._set_message("Informe origem e destino para a busca em largura.")
+                return self.message
+            result = self.graph.bfs_guided(source_vertex, target_vertex)
+            self._last_bfs = result
+            if source_vertex not in self.graph.vertices or target_vertex not in self.graph.vertices:
+                self._set_message("BFS: origem e destino precisam existir no grafo.")
+            elif result.found:
+                self._set_message(f"BFS: caminho encontrado {' → '.join(result.path)}.")
+            else:
+                self._set_message("BFS: destino não alcançável a partir da origem.")
+            return self.message
+
+    def run_dfs(self, source_vertex: str, target_vertex: str) -> str:
+        with self._lock:
+            source_vertex = source_vertex.strip()
+            target_vertex = target_vertex.strip()
+            if not source_vertex or not target_vertex:
+                self._set_message("Informe origem e destino para a busca em profundidade.")
+                return self.message
+            result = self.graph.dfs_guided(source_vertex, target_vertex)
+            self._last_dfs = result
+            if source_vertex not in self.graph.vertices or target_vertex not in self.graph.vertices:
+                self._set_message("DFS: origem e destino precisam existir no grafo.")
+            elif result.found:
+                self._set_message(f"DFS: caminho encontrado {' → '.join(result.path)}.")
+            else:
+                self._set_message("DFS: destino não alcançável a partir da origem.")
+            return self.message
+
+    @staticmethod
+    def _serialize_guided_result(
+        result: GuidedSearchResult | None,
+    ) -> dict[str, Any] | None:
+        if result is None:
+            return None
+        return {
+            "source": result.source,
+            "target": result.target,
+            "found": result.found,
+            "path": list(result.path),
+            "tree_edges": [
+                {"from": parent_vertex_id, "to": child_vertex_id, "edge_id": edge_id}
+                for parent_vertex_id, child_vertex_id, edge_id in result.tree_edges
+            ],
+        }
+
+    @staticmethod
+    def _path_adjacent_pairs(path: list[str]) -> set[tuple[str, str]]:
+        if len(path) < 2:
+            return set()
+        return {(path[index], path[index + 1]) for index in range(len(path) - 1)}
 
     def add_vertex(self, vertex: str = "") -> str:
         with self._lock:
@@ -782,9 +950,7 @@ class GraphApp:
                 if extremities is None:
                     self._set_message(f"Aresta '{edge_id}' não encontrada.")
                 else:
-                    self._set_message(
-                        f"Extremidades da aresta '{edge_id}': ({extremities[0]}, {extremities[1]})."
-                    )
+                    self._set_message(f"Extremidades da aresta '{edge_id}': ({extremities[0]}, {extremities[1]}).")
             return self.message
 
     def _serialize_graph(self, graph: Graph | None) -> dict[str, Any] | None:
@@ -809,8 +975,7 @@ class GraphApp:
                 {
                     "vertex": vertex,
                     "neighbors": [
-                        f"{neighbor} [{edge_id}, {weight}]"
-                        for neighbor, edge_id, weight in adjacency[vertex]
+                        f"{neighbor} [{edge_id}, {weight}]" for neighbor, edge_id, weight in adjacency[vertex]
                     ],
                 }
                 for vertex in sorted(adjacency)
@@ -835,11 +1000,18 @@ class GraphApp:
     def get_state(self) -> dict[str, Any]:
         with self._lock:
             mst = self.graph.prim_mst()
+            mst_cost: float | None = None
+            if mst is not None:
+                mst_cost = mst.total_edge_weight()
             return {
                 "graph": self._serialize_graph(self.graph),
                 "adjacency_matrix": self._adjacency_matrix_payload(),
                 "incidence_matrix": self._incidence_matrix_payload(),
                 "mst": self._serialize_graph(mst),
+                "mst_cost": mst_cost,
+                "roy_components": self.graph.components_roy(),
+                "bfs_last": self._serialize_guided_result(self._last_bfs),
+                "dfs_last": self._serialize_guided_result(self._last_dfs),
                 "next_ids": {
                     "vertex": self.next_vertex_id(),
                     "edge": self.next_edge_id(),
@@ -848,20 +1020,70 @@ class GraphApp:
 
     def render_graph_html(self, view: str) -> str:
         with self._lock:
-            graph = self.graph if view == "graph" else self.graph.prim_mst()
-            title = self.graph.name if view == "graph" else f"MST de {self.graph.name}"
+            path_edge_pairs: set[tuple[str, str]] = set()
+            vertex_to_component: dict[str, int] | None = None
+            graph: Graph | None
+            frame_title: str
+            default_edge_color: str
+
+            if view == "mst":
+                graph = self.graph.prim_mst()
+                frame_title = f"AGM (Prim) — {self.graph.name}"
+                default_edge_color = "#22c55e"
+            elif view == "bfs":
+                if self._last_bfs is None:
+                    return self._empty_graph_html(
+                        "Busca em largura",
+                        "Defina origem e destino no painel e execute a BFS para gerar a árvore.",
+                    )
+                graph = self.graph.build_search_tree_graph(
+                    self._last_bfs,
+                    name=f"BFS: {self._last_bfs.source} → {self._last_bfs.target}",
+                )
+                frame_title = f"BFS — {self._last_bfs.source} → {self._last_bfs.target}"
+                default_edge_color = "#93c5fd"
+                if self._last_bfs.found:
+                    path_edge_pairs = self._path_adjacent_pairs(self._last_bfs.path)
+            elif view == "dfs":
+                if self._last_dfs is None:
+                    return self._empty_graph_html(
+                        "Busca em profundidade",
+                        "Defina origem e destino no painel e execute a DFS para gerar a árvore.",
+                    )
+                graph = self.graph.build_search_tree_graph(
+                    self._last_dfs,
+                    name=f"DFS: {self._last_dfs.source} → {self._last_dfs.target}",
+                )
+                frame_title = f"DFS — {self._last_dfs.source} → {self._last_dfs.target}"
+                default_edge_color = "#93c5fd"
+                if self._last_dfs.found:
+                    path_edge_pairs = self._path_adjacent_pairs(self._last_dfs.path)
+            elif view == "roy":
+                graph = self.graph
+                frame_title = f"Roy — componentes — {self.graph.name}"
+                default_edge_color = "#93c5fd"
+                vertex_to_component = {}
+                for component_index, component_vertices in enumerate(self.graph.components_roy()):
+                    for vertex_id in component_vertices:
+                        vertex_to_component[vertex_id] = component_index
+            else:
+                graph = self.graph
+                frame_title = self.graph.name
+                default_edge_color = "#93c5fd"
 
             if graph is None:
                 return self._empty_graph_html(
-                    "MST indisponível",
+                    "AGM indisponível",
                     "A árvore geradora mínima só existe para grafos não dirigidos e conexos.",
                 )
 
             if not graph.vertices:
-                return self._empty_graph_html(
-                    title,
-                    "Adicione vértices e arestas para começar a visualizar o grafo.",
+                empty_detail = (
+                    "Adicione vértices e arestas ao grafo principal."
+                    if view in {"graph", "roy", "mst"}
+                    else "Use vértices existentes na busca ou verifique origem e destino."
                 )
+                return self._empty_graph_html(frame_title, empty_detail)
 
             network = Network(
                 height="100%",
@@ -876,17 +1098,28 @@ class GraphApp:
             adjacency = graph.get_adjacency_list()
             for vertex in sorted(graph.vertices):
                 degree = len(adjacency.get(vertex, []))
+                if vertex_to_component is not None:
+                    component_index = vertex_to_component.get(vertex, 0)
+                    node_color = _VIS_NODE_PALETTE[component_index % len(_VIS_NODE_PALETTE)]
+                    extra = f"<br>Componente (Roy): C{component_index + 1}"
+                else:
+                    node_color = "#4f9cff"
+                    extra = ""
                 network.add_node(
                     vertex,
                     label=vertex,
-                    title=f"Vértice: {vertex}<br>Conexões: {degree}",
+                    title=f"Vértice: {vertex}<br>Conexões: {degree}{extra}",
                     shape="dot",
                     size=24 + degree * 2,
-                    color="#4f9cff",
+                    color=node_color,
                 )
 
             for edge in sorted(graph.edges.values(), key=lambda item: item.id):
                 arrows = "to" if graph.directed else ""
+                on_path = (edge.source_vertex_id, edge.target_vertex_id) in path_edge_pairs
+                if not graph.directed:
+                    on_path = on_path or (edge.target_vertex_id, edge.source_vertex_id) in path_edge_pairs
+                edge_color = "#f59e0b" if on_path else default_edge_color
                 network.add_edge(
                     edge.source_vertex_id,
                     edge.target_vertex_id,
@@ -897,7 +1130,7 @@ class GraphApp:
                         f"Extremidades: {edge.source_vertex_id} {'→' if graph.directed else '↔'} {edge.target_vertex_id}"
                     ),
                     arrows=arrows,
-                    color="#93c5fd" if view == "graph" else "#22c55e",
+                    color=edge_color,
                     width=2.2,
                 )
 
@@ -928,7 +1161,7 @@ class GraphApp:
                     }
                 )
             )
-            return network.generate_html()
+            return _strip_pyvis_bootstrap_cdn(network.generate_html())
 
     @staticmethod
     def _empty_graph_html(title: str, message: str) -> str:
@@ -1031,10 +1264,26 @@ def create_app(graph_app: GraphApp) -> Flask:
         result = graph_app.query_edge_extremities(edge_id)
         return jsonify({"message": graph_app.message, "result": result})
 
+    @app.post("/api/search/bfs")
+    def api_search_bfs() -> Any:
+        payload = request.get_json(silent=True) or {}
+        result = graph_app.run_bfs(str(payload.get("v", "")), str(payload.get("w", "")))
+        return jsonify({"message": graph_app.message, "result": result, "state": graph_app.get_state()})
+
+    @app.post("/api/search/dfs")
+    def api_search_dfs() -> Any:
+        payload = request.get_json(silent=True) or {}
+        result = graph_app.run_dfs(str(payload.get("v", "")), str(payload.get("w", "")))
+        return jsonify({"message": graph_app.message, "result": result, "state": graph_app.get_state()})
+
     @app.get("/graph/frame")
-    def graph_frame() -> str:
+    def graph_frame() -> Any:
         view = request.args.get("view", "graph")
-        return graph_app.render_graph_html(view)
+        html = graph_app.render_graph_html(view)
+        response = make_response(html)
+        response.headers["Content-Type"] = "text/html; charset=utf-8"
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     return app
 
@@ -1057,9 +1306,7 @@ def _wait_for_server(url: str, attempts: int = 60) -> None:
 
 def main() -> None:
     if webview is None:
-        raise RuntimeError(
-            "A dependência 'pywebview' não está instalada. Rode `uv sync` antes de abrir a aplicação."
-        )
+        raise RuntimeError("A dependência 'pywebview' não está instalada. Rode `uv sync` antes de abrir a aplicação.")
 
     graph_app = GraphApp()
     flask_app = create_app(graph_app)
