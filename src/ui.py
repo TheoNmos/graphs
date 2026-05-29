@@ -334,6 +334,12 @@ INDEX_HTML = """
             <label>Próximo id automático
               <input id="vertex-next-id" readonly>
             </label>
+            <label>Latitude
+              <input id="vertex-lat" placeholder="Ex.: -24.955" type="number" step="any">
+            </label>
+            <label>Longitude
+              <input id="vertex-lon" placeholder="Ex.: -53.455" type="number" step="any">
+            </label>
             <button class="success" type="submit">Adicionar vértice</button>
           </form>
           <form id="vertex-remove-form" style="margin-top:12px">
@@ -420,6 +426,31 @@ INDEX_HTML = """
             </div>
             <p class="muted" style="margin:0;font-size:13px;line-height:1.45">
               Execute a busca e use os botões na visualização para ver a árvore. Caminho encontrado aparece em destaque (laranja) quando existir.
+            </p>
+          </form>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Algoritmos (T2)</h2></div>
+        <div class="card-body">
+          <form id="algorithms-form">
+            <div style="display: grid; gap: 10px;">
+              <button class="primary" type="button" id="btn-load-parana">Carregar Paraná (12 cidades)</button>
+              <button class="success" type="button" id="btn-dsatur-run">Testar DSATUR (coloração)</button>
+              
+              <div style="border-top: 1px solid var(--border); padding-top: 10px; margin-top: 5px;">
+                <label>A* - Caminho Mínimo
+                  <input id="astar-from" placeholder="Origem" style="margin-top: 5px;">
+                </label>
+                <label style="margin-top: 8px;">
+                  <input id="astar-to" placeholder="Destino">
+                </label>
+                <button class="success" type="button" id="btn-astar-run" style="margin-top: 8px;">Executar A*</button>
+              </div>
+            </div>
+            <p class="muted" style="margin:8px 0 0;font-size:13px;line-height:1.45">
+              Carregue o Paraná, execute DSATUR para colorir, e A* para encontrar caminhos mínimos.
             </p>
           </form>
         </div>
@@ -651,7 +682,13 @@ INDEX_HTML = """
 
     document.getElementById("vertex-add-form").addEventListener("submit", async (event) => {
       event.preventDefault();
-      await submitJson("/api/vertex/add", {});
+      await submitJson("/api/vertex/add", {
+        vertex: document.getElementById("vertex-next-id").value,
+        lat: document.getElementById("vertex-lat").value,
+        lon: document.getElementById("vertex-lon").value,
+      });
+      document.getElementById("vertex-lat").value = "";
+      document.getElementById("vertex-lon").value = "";
     });
 
     document.getElementById("vertex-remove-form").addEventListener("submit", async (event) => {
@@ -748,6 +785,70 @@ INDEX_HTML = """
       });
     });
 
+    document.getElementById("btn-load-parana").addEventListener("click", async () => {
+      setStatus("Carregando mapa do Paraná...");
+      const data = await api("/api/graph/load_cities", "POST");
+      if (data && data.message) {
+        setStatus(data.message);
+      }
+      await refreshState();
+      currentView = "graph";
+      refreshGraphFrame();
+    });
+
+    document.getElementById("btn-dsatur-run").addEventListener("click", async () => {
+      setStatus("Executando DSATUR...");
+      const data = await api("/api/algorithm/dsatur", "POST");
+      if (data && data.result && data.result.coloring) {
+        const { num_colors, vertices_by_color } = data.result;
+        let resultHtml = `<strong>DSATUR - Cores usadas: ${num_colors}</strong><br>`;
+        for (let color = 0; color < num_colors; color++) {
+          const vertices = vertices_by_color[color.toString()] || [];
+          resultHtml += `<div>Cor ${color}: ${vertices.join(", ")}</div>`;
+        }
+        document.getElementById("result-box").innerHTML = resultHtml;
+        setStatus(data.message || `Grafo colorido com ${num_colors} cores!`);
+      } else {
+        setStatus(data.message || "Erro ao executar DSATUR");
+      }
+      await refreshState();
+      currentView = "graph";
+      refreshGraphFrame();
+    });
+
+    document.getElementById("btn-astar-run").addEventListener("click", async () => {
+      const source = document.getElementById("astar-from").value;
+      const target = document.getElementById("astar-to").value;
+      if (!source || !target) {
+        setStatus("Informe origem e destino para A*");
+        return;
+      }
+      setStatus(`Executando A* de ${source} para ${target}...`);
+      const data = await api("/api/algorithm/astar", "POST", { source, target });
+      if (data && data.result && data.result.path) {
+        const { path, distance, path_edges, h_table, target } = data.result;
+        let resultHtml = `<strong>A* - Caminho Mínimo</strong><br>`;
+        resultHtml += `<div>Rota: ${path.join(" → ")}</div>`;
+        resultHtml += `<div>Distância: ${distance.toFixed(2)} unidades</div>`;
+        if (h_table && target) {
+          resultHtml += `<div><strong>Heurística h(n) para destino ${target}</strong></div>`;
+          resultHtml += `<div><table><thead><tr><th>Vértice</th><th>h(n)</th></tr></thead><tbody>`;
+          for (const [vertex, hn] of Object.entries(h_table)) {
+            resultHtml += `<tr><td>${vertex}</td><td>${parseFloat(hn).toFixed(2)}</td></tr>`;
+          }
+          resultHtml += `</tbody></table></div>`;
+        }
+        document.getElementById("result-box").innerHTML = resultHtml;
+        setStatus(data.message || `Caminho encontrado: ${distance.toFixed(2)} unidades`);
+      } else {
+        document.getElementById("result-box").innerHTML = "Caminho não encontrado.";
+        setStatus(data.message || "Caminho não encontrado entre os vértices");
+      }
+      await refreshState();
+      currentView = "graph";
+      refreshGraphFrame();
+    });
+
     document.getElementById("btn-refresh").addEventListener("click", refreshState);
 
     refreshState();
@@ -791,6 +892,8 @@ class GraphApp:
             self.graph = Graph(directed=directed, name=name or "Grafo Principal")
             self._last_bfs = None
             self._last_dfs = None
+            self._last_dsatur_coloring = None
+            self._last_astar_path = None
             self._set_message("Novo grafo criado com sucesso.")
             return self.message
 
@@ -851,19 +954,48 @@ class GraphApp:
             return set()
         return {(path[index], path[index + 1]) for index in range(len(path) - 1)}
 
-    def add_vertex(self, vertex: str = "") -> str:
+    def add_vertex(self, vertex: str = "", lat: Any = None, lon: Any = None) -> str:
         with self._lock:
             vertex = vertex.strip()
             if not vertex:
                 vertex = self.next_vertex_id()
-            if self.graph.add_vertex(vertex):
-                self._set_message(f"Vértice '{vertex}' adicionado.")
-            else:
-                generated = self.next_vertex_id()
-                if generated != vertex and self.graph.add_vertex(generated):
-                    self._set_message(f"Vértice '{generated}' adicionado.")
+
+            latitude = None
+            longitude = None
+            if lat is not None and lon is not None and str(lat).strip() and str(lon).strip():
+                try:
+                    latitude = float(lat)
+                    longitude = float(lon)
+                except (TypeError, ValueError):
+                    latitude = None
+                    longitude = None
+
+            if latitude is not None and longitude is not None:
+                if self.graph.add_vertex_with_coords(vertex, latitude, longitude):
+                    self._last_dsatur_coloring = None
+                    self._last_astar_path = None
+                    self._set_message(f"Vértice '{vertex}' adicionado com coordenadas.")
                 else:
-                    self._set_message(f"Vértice '{vertex}' já existe.")
+                    generated = self.next_vertex_id()
+                    if generated != vertex and self.graph.add_vertex_with_coords(generated, latitude, longitude):
+                        self._last_dsatur_coloring = None
+                        self._last_astar_path = None
+                        self._set_message(f"Vértice '{generated}' adicionado com coordenadas.")
+                    else:
+                        self._set_message(f"Vértice '{vertex}' já existe.")
+            else:
+                if self.graph.add_vertex(vertex):
+                    self._last_dsatur_coloring = None
+                    self._last_astar_path = None
+                    self._set_message(f"Vértice '{vertex}' adicionado.")
+                else:
+                    generated = self.next_vertex_id()
+                    if generated != vertex and self.graph.add_vertex(generated):
+                        self._last_dsatur_coloring = None
+                        self._last_astar_path = None
+                        self._set_message(f"Vértice '{generated}' adicionado.")
+                    else:
+                        self._set_message(f"Vértice '{vertex}' já existe.")
             return self.message
 
     def remove_vertex(self, vertex: str) -> str:
@@ -872,6 +1004,8 @@ class GraphApp:
             if not vertex:
                 self._set_message("Informe um identificador de vértice.")
             elif self.graph.remove_vertex(vertex):
+                self._last_dsatur_coloring = None
+                self._last_astar_path = None
                 self._set_message(f"Vértice '{vertex}' removido.")
             else:
                 self._set_message(f"Vértice '{vertex}' não encontrado.")
@@ -894,10 +1028,14 @@ class GraphApp:
             if not v or not w:
                 self._set_message("Preencha origem e destino da aresta.")
             elif self.graph.add_edge(edge_id, v, w, weight):
+                self._last_dsatur_coloring = None
+                self._last_astar_path = None
                 self._set_message(f"Ligação '{edge_id}' adicionada entre '{v}' e '{w}'.")
             else:
                 generated = self.next_edge_id()
                 if generated != edge_id and self.graph.add_edge(generated, v, w, weight):
+                    self._last_dsatur_coloring = None
+                    self._last_astar_path = None
                     self._set_message(f"Ligação '{generated}' adicionada entre '{v}' e '{w}'.")
                 else:
                     self._set_message("Não foi possível adicionar a ligação. Verifique os vértices.")
@@ -909,6 +1047,8 @@ class GraphApp:
             if not edge_id:
                 self._set_message("Informe o id da aresta.")
             elif self.graph.remove_edge(edge_id):
+                self._last_dsatur_coloring = None
+                self._last_astar_path = None
                 self._set_message(f"Ligação '{edge_id}' removida.")
             else:
                 self._set_message(f"Ligação '{edge_id}' não encontrada.")
@@ -951,6 +1091,93 @@ class GraphApp:
                     self._set_message(f"Extremidades da aresta '{edge_id}': ({extremities[0]}, {extremities[1]}).")
             return self.message
 
+    def load_parana_cities(self) -> str:
+        """Carrega o grafo com as cidades do Paraná."""
+        import importlib
+        from . import cities_data
+
+        importlib.reload(cities_data)
+        PARANA_CITIES = cities_data.PARANA_CITIES
+        PARANA_CONNECTIONS = cities_data.PARANA_CONNECTIONS
+
+        with self._lock:
+            self.graph = Graph(directed=False, name="Paraná - Cidades")
+            self._last_bfs = None
+            self._last_dfs = None
+            self._last_dsatur_coloring = None
+            self._last_astar_path = None
+            
+            # Adiciona vértices com coordenadas
+            for city, coords in PARANA_CITIES.items():
+                self.graph.add_vertex_with_coords(city, coords[0], coords[1])
+            
+            # Adiciona arestas
+            for city1, city2, distance in PARANA_CONNECTIONS:
+                edge_id = f"{city1[:3]}-{city2[:3]}".lower()
+                self.graph.add_edge(edge_id, city1, city2, distance)
+            
+            self._set_message(f"Mapa do Paraná carregado com {len(PARANA_CITIES)} cidades.")
+            return self.message
+
+    def run_dsatur_coloring(self) -> dict[str, Any]:
+        """Executa o algoritmo DSATUR de coloração de grafo."""
+        with self._lock:
+            if not self.graph.vertices:
+                self._set_message("Grafo vazio: não há vértices para colorir.")
+                return {}
+            
+            coloring = self.graph.dsatur_coloring()
+            self._last_dsatur_coloring = coloring
+            self._last_astar_path = None
+            
+            # Conta quantas cores foram usadas
+            num_colors = max(coloring.values()) + 1 if coloring else 0
+            self._set_message(f"DSATUR: Grafo colorido com {num_colors} cores.")
+            
+            return {
+                "coloring": coloring,
+                "num_colors": num_colors,
+                "vertices_by_color": {
+                    str(color): [v for v, c in coloring.items() if c == color]
+                    for color in range(num_colors)
+                }
+            }
+
+    def run_a_star(self, source: str, target: str) -> dict[str, Any]:
+        """Executa o algoritmo A* para encontrar o caminho mínimo."""
+        with self._lock:
+            source = source.strip()
+            target = target.strip()
+            
+            if not source or not target:
+                self._set_message("Informe origem e destino para A*.")
+                return {}
+            
+            if source not in self.graph.vertices or target not in self.graph.vertices:
+                self._set_message("A* : origem e destino precisam existir no grafo.")
+                return {}
+
+            if any(self.graph.get_vertex_coords(vertex_id) is None for vertex_id in self.graph.vertices):
+                self._set_message("A*: todos os vértices devem ter coordenadas para cálculo heurístico.")
+                return {}
+            
+            path, distance, h_table = self.graph.a_star(source, target)
+            if path is None:
+                self._last_astar_path = None
+                self._set_message(f"A*: caminho não encontrado entre '{source}' e '{target}'.")
+                return {}
+            
+            self._last_astar_path = path
+            self._last_dsatur_coloring = None
+            self._set_message(f"A*: caminho encontrado {' → '.join(path)} com distância {distance:.2f}.")
+            return {
+                "path": path,
+                "distance": distance,
+                "path_edges": [(path[i], path[i+1]) for i in range(len(path)-1)],
+                "h_table": h_table,
+                "target": target,
+            }
+
     def _serialize_graph(self, graph: Graph | None) -> dict[str, Any] | None:
         if graph is None:
             return None
@@ -960,6 +1187,10 @@ class GraphApp:
             "name": graph.name,
             "directed": graph.directed,
             "vertices": sorted(graph.vertices),
+            "coordinates": {
+                vertex: graph.get_vertex_coords(vertex)
+                for vertex in sorted(graph.vertices)
+            },
             "edges": [
                 {
                     "id": edge.id,
@@ -1020,6 +1251,8 @@ class GraphApp:
         with self._lock:
             path_edge_pairs: set[tuple[str, str]] = set()
             vertex_to_component: dict[str, int] | None = None
+            node_color_by_vertex: dict[str, str] | None = None
+            path_nodes: set[str] = set()
             graph: Graph | None
             frame_title: str
             default_edge_color: str
@@ -1068,6 +1301,14 @@ class GraphApp:
                 graph = self.graph
                 frame_title = self.graph.name
                 default_edge_color = "#93c5fd"
+                if self._last_astar_path is not None:
+                    path_edge_pairs = self._path_adjacent_pairs(self._last_astar_path)
+                    path_nodes = set(self._last_astar_path)
+                if self._last_dsatur_coloring is not None:
+                    node_color_by_vertex = {
+                        vertex: _VIS_NODE_PALETTE[color % len(_VIS_NODE_PALETTE)]
+                        for vertex, color in self._last_dsatur_coloring.items()
+                    }
 
             if graph is None:
                 return self._empty_graph_html(
@@ -1100,6 +1341,13 @@ class GraphApp:
                     component_index = vertex_to_component.get(vertex, 0)
                     node_color = _VIS_NODE_PALETTE[component_index % len(_VIS_NODE_PALETTE)]
                     extra = f"<br>Componente (Roy): C{component_index + 1}"
+                elif node_color_by_vertex is not None and vertex in node_color_by_vertex:
+                    node_color = node_color_by_vertex[vertex]
+                    color_index = self._last_dsatur_coloring.get(vertex, 0) if self._last_dsatur_coloring else 0
+                    extra = f"<br>Cor DSATUR: {color_index}"
+                elif vertex in path_nodes:
+                    node_color = "#f59e0b"
+                    extra = "<br>Parte do caminho A*"
                 else:
                     node_color = "#4f9cff"
                     extra = ""
@@ -1108,7 +1356,7 @@ class GraphApp:
                     label=vertex,
                     title=f"Vértice: {vertex}<br>Conexões: {degree}{extra}",
                     shape="dot",
-                    size=24 + degree * 2,
+                    size=(28 + degree * 2) if vertex in path_nodes else 24 + degree * 2,
                     color=node_color,
                 )
 
@@ -1220,7 +1468,7 @@ def create_app(graph_app: GraphApp) -> Flask:
     @app.post("/api/vertex/add")
     def api_vertex_add() -> Any:
         payload = request.get_json(silent=True) or {}
-        result = graph_app.add_vertex(payload.get("vertex", ""))
+        result = graph_app.add_vertex(payload.get("vertex", ""), payload.get("lat"), payload.get("lon"))
         return jsonify({"message": graph_app.message, "result": result, "state": graph_app.get_state()})
 
     @app.post("/api/vertex/remove")
@@ -1272,6 +1520,22 @@ def create_app(graph_app: GraphApp) -> Flask:
     def api_search_dfs() -> Any:
         payload = request.get_json(silent=True) or {}
         result = graph_app.run_dfs(str(payload.get("v", "")), str(payload.get("w", "")))
+        return jsonify({"message": graph_app.message, "result": result, "state": graph_app.get_state()})
+
+    @app.post("/api/graph/load_cities")
+    def api_load_cities() -> Any:
+        result = graph_app.load_parana_cities()
+        return jsonify({"message": result, "state": graph_app.get_state()})
+
+    @app.post("/api/algorithm/dsatur")
+    def api_dsatur() -> Any:
+        result = graph_app.run_dsatur_coloring()
+        return jsonify({"message": graph_app.message, "result": result, "state": graph_app.get_state()})
+
+    @app.post("/api/algorithm/astar")
+    def api_astar() -> Any:
+        payload = request.get_json(silent=True) or {}
+        result = graph_app.run_a_star(str(payload.get("source", "")), str(payload.get("target", "")))
         return jsonify({"message": graph_app.message, "result": result, "state": graph_app.get_state()})
 
     @app.get("/graph/frame")

@@ -42,6 +42,7 @@ class Graph:
         self._vertices: set[str] = set()
         self._edges: dict[str, Edge] = {}
         self._adjacency: dict[str, list[tuple[str, str, float]]] = {}  # lista de adjacência do grafo
+        self._coordinates: dict[str, tuple[float, float]] = {}  # coordenadas (x, y) dos vértices
 
     def add_vertex(self, vertex_id: str) -> bool:
         """Insere um novo vértice isolado."""
@@ -507,6 +508,158 @@ class Graph:
     def vertices(self) -> set[str]:
         # devolve uma cópia pra evitar alteração externa direta no conjunto interno
         return self._vertices.copy()
+
+    def add_vertex_with_coords(self, vertex_id: str, x: float, y: float) -> bool:
+        """Insere um vértice com coordenadas (x, y)."""
+        if not self.add_vertex(vertex_id):
+            return False
+        self._coordinates[vertex_id] = (x, y)
+        return True
+
+    def get_vertex_coords(self, vertex_id: str) -> Optional[tuple[float, float]]:
+        """Retorna as coordenadas (x, y) de um vértice."""
+        return self._coordinates.get(vertex_id)
+
+    def manhattan_distance(self, v1: str, v2: str) -> Optional[float]:
+        """Calcula distância de Manhattan entre dois vértices."""
+        coords1 = self._coordinates.get(v1)
+        coords2 = self._coordinates.get(v2)
+        if coords1 is None or coords2 is None:
+            return None
+        x1, y1 = coords1
+        x2, y2 = coords2
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    def dsatur_coloring(self) -> dict[str, int]:
+        """
+        Algoritmo DSATUR para coloração de grafo.
+        Retorna dicionário {vertex_id: color} onde colors são inteiros começando de 0.
+        """
+        coloring: dict[str, int] = {}
+        
+        if not self._vertices:
+            return coloring
+
+        # Ordena vértices por grau decrescente (começa com o vértice de maior grau)
+        vertex_degrees = [(v, len(self._adjacency.get(v, []))) for v in self._vertices]
+        vertex_degrees.sort(key=lambda x: x[1], reverse=True)
+
+        # Colore o vértice com maior grau com cor 0
+        first_vertex = vertex_degrees[0][0]
+        coloring[first_vertex] = 0
+
+        # Processa vértices restantes em ordem de DSAT
+        while len(coloring) < len(self._vertices):
+            # Calcula DSAT (grau de saturação) para cada vértice não colorido
+            best_vertex = None
+            best_dsat = -1
+            best_degree = -1
+
+            for vertex in self._vertices:
+                if vertex in coloring:
+                    continue
+
+                # DSAT = número de cores diferentes adjacentes ao vértice
+                neighbor_colors: set[int] = set()
+                for neighbor, _, _ in self._adjacency.get(vertex, []):
+                    if neighbor in coloring:
+                        neighbor_colors.add(coloring[neighbor])
+
+                dsat = len(neighbor_colors)
+                degree = len(self._adjacency.get(vertex, []))
+
+                # Seleciona vértice com maior DSAT (desempate por grau)
+                if dsat > best_dsat or (dsat == best_dsat and degree > best_degree):
+                    best_vertex = vertex
+                    best_dsat = dsat
+                    best_degree = degree
+
+            if best_vertex is None:
+                break
+
+            # Encontra a menor cor disponível para best_vertex
+            used_colors: set[int] = set()
+            for neighbor, _, _ in self._adjacency.get(best_vertex, []):
+                if neighbor in coloring:
+                    used_colors.add(coloring[neighbor])
+
+            # Atribui a menor cor não usada
+            color = 0
+            while color in used_colors:
+                color += 1
+            coloring[best_vertex] = color
+
+        return coloring
+
+    def a_star(self, source: str, target: str) -> tuple[Optional[list[str]], Optional[float], dict[str, float]]:
+        """
+        Algoritmo A* para encontrar o caminho mínimo.
+        Usa distância de Manhattan como heurística.
+        Retorna (caminho, distância_total, h_table).
+        """
+        import heapq
+
+        if source not in self._vertices or target not in self._vertices:
+            return None, None, {}
+
+        if source == target:
+            h_table = {
+                vertex_id: self.manhattan_distance(vertex_id, target) or 0.0
+                for vertex_id in sorted(self._vertices)
+            }
+            return [source], 0.0, h_table
+
+        # Verifica se todos os vértices têm coordenadas
+        if any(self.get_vertex_coords(vertex_id) is None for vertex_id in self._vertices):
+            return None, None, {}
+
+        # Estruturas para A*
+        open_set: list[tuple[float, str]] = [(0, source)]  # (f_score, vertex)
+        came_from: dict[str, str] = {}
+        g_score: dict[str, float] = {source: 0.0}
+        f_score: dict[str, float] = {source: self.manhattan_distance(source, target) or 0.0}
+
+        closed_set: set[str] = set()
+
+        while open_set:
+            current_f, current = heapq.heappop(open_set)
+            
+            if current in closed_set:
+                continue
+
+            if current == target:
+                # Reconstrói o caminho
+                path = [current]
+                step = current
+                while step in came_from:
+                    step = came_from[step]
+                    path.append(step)
+                path.reverse()
+                h_table = {
+                    vertex_id: self.manhattan_distance(vertex_id, target) or 0.0
+                    for vertex_id in sorted(self._vertices)
+                }
+                return path, g_score[target], h_table
+
+            closed_set.add(current)
+
+            # Examina vizinhos
+            for neighbor, edge_id, edge_weight in self._adjacency.get(current, []):
+                if neighbor in closed_set:
+                    continue
+
+                tentative_g = g_score[current] + edge_weight
+
+                if neighbor not in g_score or tentative_g < g_score[neighbor]:
+                    came_from[neighbor] = current
+                    g_score[neighbor] = tentative_g
+                    h_score = self.manhattan_distance(neighbor, target) or 0.0
+                    f_score[neighbor] = tentative_g + h_score
+                    heapq.heappush(open_set, (f_score[neighbor], neighbor))
+
+        return None, None, {}
+
+
 
     @property
     def edges(self) -> dict[str, Edge]:
