@@ -437,7 +437,7 @@ INDEX_HTML = """
           <form id="algorithms-form">
             <div style="display: grid; gap: 10px;">
               <button class="primary" type="button" id="btn-load-parana">Carregar Paraná (12 cidades)</button>
-              <button class="success" type="button" id="btn-dsatur-run">Testar DSATUR (coloração)</button>
+              <button class="success" type="button" id="btn-dsatur-run">DSATUR (coloração)</button>
               
               <div style="border-top: 1px solid var(--border); padding-top: 10px; margin-top: 5px;">
                 <label>A* - Caminho Mínimo
