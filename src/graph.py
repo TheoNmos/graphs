@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from typing import Optional
+import math
 
 
 @dataclass
@@ -522,13 +523,27 @@ class Graph:
 
     def manhattan_distance(self, v1: str, v2: str) -> Optional[float]:
         """Calcula distância de Manhattan entre dois vértices."""
+        # Interpreta as coordenadas como (latitude, longitude) em graus.
+        # Converte diferenças em graus para quilômetros aproximados:
+        #  - 1 grau latitude ≈ 111.32 km
+        #  - 1 grau longitude ≈ 111.32 * cos(mean_latitude) km
         coords1 = self._coordinates.get(v1)
         coords2 = self._coordinates.get(v2)
         if coords1 is None or coords2 is None:
             return None
-        x1, y1 = coords1
-        x2, y2 = coords2
-        return abs(x1 - x2) + abs(y1 - y2)
+        lat1, lon1 = coords1
+        lat2, lon2 = coords2
+        try:
+
+            dlat = abs(float(lat1) - float(lat2))
+            dlon = abs(float(lon1) - float(lon2))
+            mean_lat_rad = math.radians((float(lat1) + float(lat2)) / 2.0)
+            km_per_deg_lat = 111.32
+            km_per_deg_lon = 111.32 * math.cos(mean_lat_rad)
+            return dlat * km_per_deg_lat + dlon * km_per_deg_lon
+        except Exception:
+            # Se ocorrer algum problema na conversão, retorna None para indicar impossibilidade
+            return None
 
     def dsatur_coloring(self) -> dict[str, int]:
         """
