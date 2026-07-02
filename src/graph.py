@@ -4,6 +4,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Optional
 import math
+import heapq
 
 
 @dataclass
@@ -518,11 +519,11 @@ class Graph:
         return True
 
     def get_vertex_coords(self, vertex_id: str) -> Optional[tuple[float, float]]:
-        """Retorna as coordenadas (x, y) de um vértice."""
+        #Retorna as coordenadas (x, y) de um vértice
         return self._coordinates.get(vertex_id)
 
     def manhattan_distance(self, v1: str, v2: str) -> Optional[float]:
-        """Calcula distância de Manhattan entre dois vértices."""
+        #Calcula distância de Manhattan entre dois vértices.
         # Interpreta as coordenadas como (latitude, longitude) em graus.
         # Converte diferenças em graus para quilômetros aproximados:
         #  - 1 grau latitude ≈ 111.32 km
@@ -612,7 +613,7 @@ class Graph:
         Usa distância de Manhattan como heurística.
         Retorna (caminho, distância_total, h_table).
         """
-        import heapq
+        
 
         if source not in self._vertices or target not in self._vertices:
             return None, None, {}
